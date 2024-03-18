@@ -1,9 +1,12 @@
 """Utility functions used in running optimization."""
+import warnings
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
+import pandas as pd
+from skopt import gp_minimize
 
 #  dictionary outlining potential seed paths for each of the top 8 seeds
 SEED_PATH_DICTIONARY = {
@@ -17,6 +20,34 @@ SEED_PATH_DICTIONARY = {
     8: [9, (1, 16), (4, 5, 12, 13), (2, 3, 6, 7, 10, 11, 14, 15)],
 }
 SINGLE_REGION_SEARCH_SPACE = list(np.arange(1, 17))
+
+
+def calculate_total_points_for_seed_combination(
+    list_of_seeds: List[float],
+    win_probability_dictionary: Dict[int, Dict[int, float]],
+    n_iterations: int = 1000,
+) -> int:
+    """Calculate the total points for a given seed combination."""
+    # first, we need to clip floating point values to integers within the search space since
+    # all seeds are integers - this is for compatibility if we ever tried to use bayesian optimisation
+    clipped_seeds = clip_continuous_inputs_to_discrete_search_space(
+        continuous_input_arr=list_of_seeds
+    )
+    # run the optimization a thousand times - this allows create an expected value for points for this seed
+    # combination so that we can ignore anomalous runs
+    region_results = []
+    for _ in range(n_iterations):
+        region = RegionBracket(
+            seed_path_dictionary=SEED_PATH_DICTIONARY,
+            win_probability_dictionary=win_probability_dictionary,
+        )
+        region.simulate_region_tournament()
+        region_results.append(region.points_by_seed)
+    # create output dataframe and filter to desired seeds
+    region_result_df = pd.DataFrame(region_results)[clipped_seeds]
+    # take sum across first, axis, and then take the mean of this summed column
+    average_total_point_value = region_result_df.sum(axis=1).mean()
+    return average_total_point_value
 
 
 @dataclass
@@ -100,7 +131,7 @@ class RegionBracket:
 
 def clip_continuous_inputs_to_discrete_search_space(
     continuous_input_arr: List[float],
-    discrete_search_space: Optional[List[int]],
+    discrete_search_space: Optional[List[int]] = None,
     replace: bool = False,
 ) -> List[int]:
     """Clip array of floating point inputs to discrete search space."""
