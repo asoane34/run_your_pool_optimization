@@ -5,6 +5,7 @@ from itertools import chain
 from typing import Dict, List
 
 import bs4
+import numpy as np
 from bs4 import BeautifulSoup
 
 
@@ -153,7 +154,7 @@ def parse_wikipedia_bracket_matchup_table(
         # of knowing what the actual historical win percentage would be - these are very low probability
         # so we'll work them out with repeated sampling
         winning_percentages = [
-            float(match.group()) if match else 0.50 for match in all_tags
+            float(match.group()) if match else -1.0 for match in all_tags
         ]
         # add the associated winning percentage between this seed combination
         winning_percentage_dict[seed] = {
@@ -161,3 +162,40 @@ def parse_wikipedia_bracket_matchup_table(
             for other_seed, pctage in zip(header_seeds, winning_percentages)
         }
     return winning_percentage_dict
+
+def add_surrogate_win_probabilities_for_matchups(
+    win_probability_dictionary : Dict[int, Dict[int, float]],
+) -> Dict[int, Dict[int, float]]:
+    """
+    Add surrogate win probabilities using average win probability by seed differential to
+    fill in for probabilities of matchups that have never occurred in tournament play.
+    """
+    seed_differential_win_probability = {n: np.array([]) for n in range(1, 16)}
+    for seed, item in win_probability_dictionary.items():
+        for opponent, pctage in item.items():
+            if pctage > 0.0:
+                # we are always going to provide the win probability of the better seed
+                win_pctage = pctage if seed < opponent else 1.0 - pctage
+                seed_differential_abs = abs(seed - opponent)
+                seed_differential_win_probability[seed_differential_abs] = np.append(
+                    seed_differential_win_probability[seed_differential_abs], win_pctage
+                )
+    # get aggregates - there is a case where no two seeds have ever played a game with
+    # a seed differential of 14 (a 15 has never played a 1, and a 16 has never played a 2)
+    # there's only one such case possible so we'll use 0.90 as the seed differential is quite large
+    seed_differential_win_probability = {
+        key: arr.mean() if arr.size else 0.90
+        for key, arr in seed_differential_win_probability.items()
+    }
+    # iterate back over win probability dictionary and replace the missing matchups with these
+    # surrogate probabilities
+    for seed, win_prob_dict in win_probability_dictionary.items():
+        for opponent_seed, win_prob in win_prob_dict.items():
+            if win_prob < 0.0:
+                seed_differential = abs(seed - opponent_seed)
+                pctage = seed_differential_win_probability[seed_differential]
+                # determine if we want this percentage of 1 - pctage, these percentages
+                # are all from the point of view of the favorite
+                win_pctage = pctage if seed < opponent_seed else 1.0 - pctage
+                win_prob_dict[opponent_seed] = win_pctage
+    return win_probability_dictionary

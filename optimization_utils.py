@@ -63,7 +63,7 @@ class RegionBracket:
         self.current_matchup_state = deepcopy(self.seed_path_dictionary)
 
     def simulate_region_tournament(self) -> None:
-        """Simulate all 4 rouns of the region."""
+        """Simulate all 4 rounds of the region."""
         for _ in range(4):
             self.simulate_round_and_update_current_state()
 
